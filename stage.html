@@ -189,6 +189,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   @keyframes rowflash {
     from { background:rgba(140,240,225,0.4); }
     to   { background:transparent; } }
+  /* SWIPE HIGHLIGHT (2026-09): the row swipe-left/right currently points
+     at, independent of where the palm cursor actually is -- lets a
+     rough swipe pick a row, then a palm-dwell ANYWHERE in the pane
+     (not just precisely on the row) commits to it. */
+  .brow.hi { background:rgba(0,229,255,0.16);
+             box-shadow:inset 3px 0 0 #00e5ff; }
   .card p  { margin:0; font-size:17px; line-height:1.45; color:#dcf5ee; text-shadow:0 1px 3px rgba(3,18,16,0.55); }
   .card p:empty { display:none; }
   .card.grabbed, .panel.grabbed { border-color:#8ff0e4;
@@ -213,15 +219,78 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   .panel .scroll { transition:none; font-size:14.5px; line-height:1.5; color:#dcf5ee; text-shadow:0 1px 3px rgba(3,18,16,0.55);
                    white-space:pre-wrap; font-family:-apple-system,sans-serif; }
   .panel .scroll b { color:#fff; } .panel .scroll .h { color:#8ff0e4; font-weight:700; }
-  .cursor { position:absolute; width:28px; height:28px; margin:-14px 0 0 -14px;
-            border-radius:50%; border:2.5px solid rgba(111,229,214,0.9);
-            background:rgba(111,229,214,0.12); pointer-events:none; z-index:999; }
-  .cursor.pinched { background:rgba(111,229,214,0.85); transform:scale(0.62);
-                    box-shadow:0 0 18px rgba(111,229,214,0.8); }
-  .cursor .dwell { position:absolute; inset:-7px; border-radius:50%;
-                   background:conic-gradient(#8ff0e4 calc(var(--p)*360deg), transparent 0);
-                   -webkit-mask:radial-gradient(circle, transparent 58%, black 60%);
+  /* PALM CURSOR (2026-09): bigger + a true glowing cyan, replacing the
+     28px mint dot — this IS the hand now, so it has to read from
+     across a room. --pr is the cursor's own scale multiplier, driven
+     per-frame by updatePalmInteraction() (bigger on a fresh hover,
+     easing back to 1 the longer it dwells so the fill ring stays the
+     star of the show). Sizing lives on the element's transform, not
+     width/height, so the existing margin math above (used for
+     centering) keeps working unmodified. */
+  .cursor { position:absolute; width:56px; height:56px; margin:-28px 0 0 -28px;
+            border-radius:50%; border:3px solid rgba(0,229,255,0.95);
+            background:rgba(0,229,255,0.10); pointer-events:none; z-index:999;
+            box-shadow:0 0 26px rgba(0,229,255,0.55), 0 0 60px rgba(0,229,255,0.22);
+            transform:scale(var(--pr,1)); transition:background-color 0.15s, transform 0.12s ease-out; }
+  .cursor.pinched { background:rgba(0,229,255,0.85);
+                    box-shadow:0 0 30px rgba(0,229,255,0.85), 0 0 70px rgba(0,229,255,0.35); }
+  .cursor.hovering { background:rgba(0,229,255,0.22); }
+  .cursor.fisted { border-color:rgba(255,140,60,0.95);
+                   box-shadow:0 0 26px rgba(255,140,60,0.55), 0 0 60px rgba(255,140,60,0.2); }
+  /* ONE-FINGER DRAG / TWO-FINGER SCALE (2026-09-21) -- a solid cyan
+     fill while actively dragging (the spec's explicit ask: "a clear
+     cyan DRAGGING state"), a teal-green fill while scaling so the two
+     never read as the same thing at a glance. */
+  .cursor.dragging { background:rgba(0,229,255,0.85);
+                      box-shadow:0 0 30px rgba(0,229,255,0.85), 0 0 70px rgba(0,229,255,0.35); }
+  .cursor.scaling { background:rgba(57,255,176,0.75); border-color:rgba(57,255,176,0.95);
+                     box-shadow:0 0 30px rgba(57,255,176,0.75), 0 0 70px rgba(57,255,176,0.3); }
+  .cursor .dwell { position:absolute; inset:-10px; border-radius:50%;
+                   background:conic-gradient(#00e5ff calc(var(--p)*360deg), transparent 0);
+                   -webkit-mask:radial-gradient(circle, transparent 62%, black 64%);
                    opacity:0.95; }
+  .cursor.fisted .dwell {
+                   background:conic-gradient(#ff8c3c calc(var(--p)*360deg), transparent 0); }
+  /* the "Detected: ..." label -- one line, always on, large enough to
+     read from across a room; a small colored dot echoes the cursor's
+     own state color so the two never disagree. */
+  #gestureLabel { position:absolute; bottom:56px; left:0; right:0;
+      text-align:center; z-index:998; pointer-events:none;
+      font:600 20px "SF Mono",Menlo,monospace; letter-spacing:0.05em;
+      color:#eafffb; text-shadow:0 2px 10px rgba(0,0,0,0.9), 0 0 16px rgba(0,229,255,0.35); }
+  #gestureLabel .dot { display:inline-block; width:11px; height:11px;
+      border-radius:50%; margin-right:9px; vertical-align:middle;
+      background:#00e5ff; box-shadow:0 0 10px #00e5ff; }
+  body.overlay #gestureLabel { display:none; }
+  /* floating status panels (Folders / Files / Gesture Status) — small,
+     always-on, DECORATIVE readouts, deliberately distinct from the
+     real interactive .panel.browser trees (tap-the-ring still opens
+     those); reuse the existing glass-card look for visual consistency
+     rather than inventing a second design language. */
+  .statpanel { position:fixed; width:230px; padding:14px 16px;
+      border-radius:14px; z-index:60; pointer-events:none;
+      background:linear-gradient(168deg, rgba(20,55,60,0.42), rgba(6,20,22,0.30));
+      border:1.5px solid rgba(0,229,255,0.4);
+      box-shadow:0 8px 30px rgba(0,0,0,0.4), 0 0 20px rgba(0,229,255,0.12),
+                 inset 0 1px 0 rgba(180,250,255,0.35);
+      color:#eafffb; font:13px -apple-system,sans-serif; }
+  .statpanel h4 { margin:0 0 8px; font:700 12px "SF Mono",Menlo,monospace;
+      letter-spacing:0.12em; color:#7fe9ff; text-transform:uppercase; }
+  .statpanel .row { display:flex; justify-content:space-between; gap:10px;
+      padding:3px 0; color:#c9f4f0; }
+  #statFolders { top:96px; left:22px; }
+  #statFiles { top:96px; right:22px; }
+  #statGesture { bottom:96px; left:22px; }
+  /* stage/tracker-page furniture only -- never on the OBS broadcast
+     page (?role=render), same treatment #hint already gets there. */
+  body.overlay .statpanel { display:none; }
+  /* the decorative background hologram scene: a single shared canvas,
+     BEHIND every card/panel (#behind is z-index:1, so this sits below
+     it), non-interactive, camera-transparent so #cam still shows
+     through. Deliberately its own lightweight Three.js instance --
+     see holoBackground() -- never the heavier per-item MSCENES rig
+     (bloom/adaptive-res/ghost shaders) the real 3D model cards use. */
+  #holoBG { position:fixed; inset:0; z-index:0; pointer-events:none; }
   #hint { position:absolute; bottom:14px; left:0; right:0; text-align:center;
           color:rgba(230,255,240,0.7); font-size:13.5px; z-index:998;
           text-shadow:0 1px 6px rgba(0,0,0,0.8); }
@@ -283,15 +352,21 @@ setTimeout(function () {
 }, 12000);
 </script>
 <video id="cam" autoplay playsinline muted></video>
+<canvas id="holoBG"></canvas>
 <div id="behind"></div>
 <div id="boot">BAREHANDS<br><span style="color:#a8d8cf;font-size:12px;letter-spacing:0.22em">by jaredrhod</span><br><span style="color:#a8d8cf;font-size:13px">loading hand tracker… allow the camera when asked</span></div>
-<div id="hint">tap the RING = orbs · tap an orb = its tree · TAP a card = open · pinch-drag = move · hold still ~1s = 3D rotate · two hands = scale · TAP an open item = close · CLAP (palms together, fingers up) = ring center-stage · CLAW: flash open, claw, aim, hold the strain 2s, SNAP = force pull · empty pinch dragged sideways = explode scrub · R respawn / C camera / D debug</div>
+<div id="hint">OPEN PALM over a folder/file, hold ~1s = open · CLOSED FIST held ~1s = back/cancel · SWIPE LEFT/RIGHT = navigate cards · POINT (index finger only), hold briefly then move = drag the selected panel/3D object · hold still ~1s while dragging = 3D rotate · TWO FINGERS (index + middle), hand up/down = scale the selected 3D object · CLAP (palms together, fingers up) = ring center-stage · CLAW: flash open, claw, aim, hold the strain 2s, SNAP = force pull · R respawn / C camera / D debug</div>
 <div id="debug"></div>
 <div id="toast"></div>
+<div id="gestureLabel"><span class="dot"></span>Detected: No hand</div>
+<div id="statFolders" class="statpanel"><h4>Folders</h4><div class="body"></div></div>
+<div id="statFiles" class="statpanel"><h4>Files</h4><div class="body"></div></div>
+<div id="statGesture" class="statpanel"><h4>Gesture Status</h4><div class="body"></div></div>
 
 <script type="module">
 import { HandLandmarker, FilesetResolver } from
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import * as THREE from "three";
 
 // modes: ?mode=mirror (default, self-view) | overlay (transparent — OBS
 // browser sources can't open cameras reliably on macOS, kept for browsers
@@ -335,8 +410,13 @@ if (MODE === "key") {
 const cam = document.getElementById("cam");
 const BEHIND = document.getElementById("behind");
 const dbg = document.getElementById("debug");
+const gestureLabelEl = document.getElementById("gestureLabel");
+const statFoldersEl = document.getElementById("statFolders");
+const statFilesEl = document.getElementById("statFiles");
+const statGestureEl = document.getElementById("statGesture");
 let items = [];        // cards + panels: {el,type,x,y,scale,vx,vy,grabbedBy:[],ox,oy,flying,file,stretch,scrollY,body}
 let cursors = {};
+let curGestureLabel = "No hand";   // drives #gestureLabel + the dot color
 let SAMPLER = null;    // the pose sampler (dormant — claw/pinch tuning)
 let CLAPSAMP = null;   // the P clap recorder (v3.9.1)
 let SAMPLED = "";      // its frozen last result (D overlay)
@@ -1348,6 +1428,33 @@ async function loadTree() {
   }
   try { const r = await fetch("/props"); if (r.ok) PROPSTREE = await r.json(); }
   catch (e) {}
+  refreshStatPanels();
+}
+
+// the #statFolders / #statFiles panels (2026-09): a snapshot of
+// CFG.orbs + TREES/PROPSTREE, recomputed only when the tree actually
+// reloads (boot, R respawn, clap-reset) — NOT every frame, since
+// walking a tree is real work and this data never changes mid-gesture.
+function refreshStatPanels() {
+  if (!statFoldersEl || !statFilesEl) return;
+  let dirs = 0, notes = 0, props = 0;
+  const rows = [];
+  (CFG.orbs || []).forEach((o, idx) => {
+    if (o.kind === "media") {
+      const c = PROPSTREE ? treeCounts(PROPSTREE, true) : { dirs: 0, leaves: 0 };
+      dirs += c.dirs; props += c.leaves;
+      rows.push(`<div class="row"><span>${escT(o.title || "Props")}</span><span>${c.dirs} / ${c.leaves}</span></div>`);
+    } else {
+      const c = TREES[idx] ? treeCounts(TREES[idx], false) : { dirs: 0, leaves: 0 };
+      dirs += c.dirs; notes += c.leaves;
+      rows.push(`<div class="row"><span>${escT(o.title || "Notes")}</span><span>${c.dirs} / ${c.leaves}</span></div>`);
+    }
+  });
+  statFoldersEl.querySelector(".body").innerHTML =
+    rows.join("") || `<div class="row"><span>total</span><span>${dirs}</span></div>`;
+  statFilesEl.querySelector(".body").innerHTML =
+    `<div class="row"><span>notes</span><span>${notes}</span></div>` +
+    `<div class="row"><span>props</span><span>${props}</span></div>`;
 }
 
 function treeCounts(d, isProps) {
@@ -1371,9 +1478,10 @@ function spawnStage(cx = 0.30, cy = 0.45) {
 }
 
 // ---- THE BROWSER PANES (shelf v3): one pane per kind, an indented
-// tree that unfolds in place. Rows = fat tap zones; pinch-drag =
-// scroll (the panel machinery verbatim); hold-still = move; flash =
-// close. The scatter-bloom system this replaced is gone.
+// tree that unfolds in place. Rows open via palm-hover dwell only
+// (2026-09); point-drag = scroll (the panel machinery verbatim);
+// hold-still while dragging = move. The scatter-bloom system this
+// replaced is gone.
 function escT(t) {
   return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
                   .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -1412,6 +1520,13 @@ function browserRefresh(b) {
   b.rowTuples = b.rows.map(r => [r.d, r.t, r.k, r.o || 0]);
   b.rowsV = (b.rowsV || 0) + 1;
   b.body.innerHTML = browserRowsHTML(b.rowTuples);
+  // swipe-nav highlight (2026-09): re-stamped every refresh since
+  // innerHTML above wipes it; a no-op for every pre-existing caller
+  // that never sets b.hi.
+  if (b.hi != null && b.hi >= 0 && b.hi < b.rows.length) {
+    const hEl = b.body.querySelector(`.brow[data-i="${b.hi}"]`);
+    if (hEl) hEl.classList.add("hi");
+  } else b.hi = -1;
   const box = b.body.parentElement.clientHeight;
   const maxS = Math.max(0, b.body.offsetHeight - box + 40);
   b.scrollY = Math.min(b.scrollY || 0, maxS);
@@ -1496,39 +1611,49 @@ function flashRow(container, i) {
   setTimeout(() => el.classList.remove("flash"), 700);
 }
 
-function browserTap(b, cur) {
+// pulled out of browserTap (2026-09) so the new palm-dwell / swipe-nav
+// path can fire a row exactly like a pinch-tap does, without a second
+// copy of the dir/note/prop branch to drift out of sync.
+function activateBrowserRow(b, idx) {
+  const row = b.rows[idx];
+  if (!row) return;
+  // the tap flash: mark it for both pages (dir taps re-render the
+  // rows, so the local flash applies AFTER the branch runs; the
+  // tapped dir keeps its index — children insert below it)
+  b.flashI = idx;
+  b.flashV = (b.flashV || 0) + 1;
+  setTimeout(() => flashRow(b.body, b.flashI), 0);
+  if (row.k === "dir") {
+    if (b.expanded.has(row.key)) b.expanded.delete(row.key);
+    else b.expanded.add(row.key);
+    browserRefresh(b);
+  } else if (row.k === "note") {
+    openPanel({ def: { file: row.f, title: row.t } });
+    killItem(b);   // v3.3 (his broadened rule): selecting ANYTHING
+                   // closes the whole pane — only dir taps keep it
+  } else if (row.k === "prop") {
+    const src = "/media/" + row.f;
+    const it = isModelSrc(src) ? makeModel(src, row.t)
+                               : makeImage(src, row.t);
+    it.x = Math.min(b.x + 480, innerWidth - 240); it.y = b.y;
+    it.anim = { k: "in", t: 0 }; it.el.style.opacity = "0.05";
+    items.push(it);
+    killItem(b);   // v3.3: any selection closes the pane
+  }
+}
+
+function browserRowAt(b, cur) {
   for (const rowEl of b.el.querySelectorAll(".brow")) {
     const r = rowEl.getBoundingClientRect();
     if (cur.y >= r.top && cur.y <= r.bottom &&
-        cur.x >= r.left && cur.x <= r.right) {
-      const row = b.rows[+rowEl.dataset.i];
-      if (!row) return;
-      // the tap flash: mark it for both pages (dir taps re-render the
-      // rows, so the local flash applies AFTER the branch runs; the
-      // tapped dir keeps its index — children insert below it)
-      b.flashI = +rowEl.dataset.i;
-      b.flashV = (b.flashV || 0) + 1;
-      setTimeout(() => flashRow(b.body, b.flashI), 0);
-      if (row.k === "dir") {
-        if (b.expanded.has(row.key)) b.expanded.delete(row.key);
-        else b.expanded.add(row.key);
-        browserRefresh(b);
-      } else if (row.k === "note") {
-        openPanel({ def: { file: row.f, title: row.t } });
-        killItem(b);   // v3.3 (his broadened rule): selecting ANYTHING
-                       // closes the whole pane — only dir taps keep it
-      } else if (row.k === "prop") {
-        const src = "/media/" + row.f;
-        const it = isModelSrc(src) ? makeModel(src, row.t)
-                                   : makeImage(src, row.t);
-        it.x = Math.min(b.x + 480, innerWidth - 240); it.y = b.y;
-        it.anim = { k: "in", t: 0 }; it.el.style.opacity = "0.05";
-        items.push(it);
-        killItem(b);   // v3.3: any selection closes the pane
-      }
-      return;
-    }
+        cur.x >= r.left && cur.x <= r.right) return +rowEl.dataset.i;
   }
+  return -1;
+}
+
+function browserTap(b, cur) {
+  const idx = browserRowAt(b, cur);
+  if (idx >= 0) activateBrowserRow(b, idx);
 }
 
 // minimal safe markdown-ish render: escape all HTML, then style headers/bold
@@ -1662,7 +1787,21 @@ function getCursor(i) {
                    y: innerHeight / 2, pinched: false, history: [],
                    palmOpen: false, softOpen: false, lastOpenT: 0,
                    lastSoftT: 0, wipe: null,
-                   pinchT: 0, ghost: false };
+                   pinchT: 0, ghost: false,
+                   // PALM DWELL / SWIPE / FIST (2026-09 addition): kept
+                   // entirely separate from every field above -- this
+                   // block owns ONLY the new open-palm interaction, so
+                   // it can never interact with the pinch/claw state
+                   // machines those fields already drive.
+                   dwellTarget: null, dwellStart: 0, dwellArmedAt: 0,
+                   fistStart: 0, fistFired: false,
+                   gesture: "none",
+                   // ONE-FINGER DRAG / TWO-FINGER SCALE (2026-09-21
+                   // addition, replacing pinch manipulation): also fully
+                   // separate state -- see updateManipulation().
+                   pointPoseStart: 0, pointDragging: false, pointDragId: null,
+                   scaling: false, scaleBaseY: 0, scaleBaseScale: 1,
+                   scaleTargetId: null };
   }
   return cursors[i];
 }
@@ -1689,6 +1828,301 @@ function hitTest(cur) {
 // no zones, no direction juries. The conflict didn't get solved; it got
 // dissolved (Jared's design).
 
+// ============================================================
+// PALM HOVER-DWELL / FIST-BACK / SWIPE-NAV (2026-09 addition)
+//
+// An accessible alternative to the pinch-tap vocabulary above, built
+// entirely OFF the existing signals (cur.palmOpen, extFingers, hspd,
+// handGarbage, cur.history) rather than by touching any of the pinch
+// or claw state machines — this block owns its own fields only
+// (cur.dwellTarget / dwellStart / fistStart / fistFired / gesture) and
+// calls the SAME open-actions (openPanel/openBrowser/ringToggle/
+// activateBrowserRow) a pinch-tap already calls, so "opening" behaves
+// identically no matter which gesture triggered it.
+// ============================================================
+const DWELL_MS = 1000, FIST_MS = 1000;
+
+// Identity of whatever the palm is currently over, precise enough that
+// moving to a DIFFERENT row/card resets the dwell timer even if the
+// broad hitTest() target (the whole browser pane) hasn't changed.
+function palmTargetKey(c, cur) {
+  if (!c) return null;
+  if (c.type === "browser") {
+    const idx = browserRowAt(c, cur);
+    if (idx >= 0) return c.id + ":row" + idx;
+    if (c.hi != null && c.hi >= 0) return c.id + ":hi" + c.hi;  // swipe fallback
+    return null;
+  }
+  if (c.type === "card" && c.def && c.def.file) return c.id + ":card";
+  if (c.type === "orb") return c.id + ":orb";
+  if (c.type === "widget" && c.def && c.def.w === "ring") return c.id + ":ring";
+  return null;
+}
+
+function firePalmTarget(c, cur) {
+  if (c.type === "browser") {
+    const idx = browserRowAt(c, cur);
+    if (idx >= 0) activateBrowserRow(c, idx);
+    else if (c.hi != null && c.hi >= 0) activateBrowserRow(c, c.hi);
+  } else if (c.type === "card" && c.def && c.def.file) {
+    openPanel(c);
+  } else if (c.type === "orb") {
+    openBrowser(c.def.orb, c.x, c.y);
+  } else if (c.type === "widget" && c.def && c.def.w === "ring") {
+    ringToggle(c);
+  }
+}
+
+// closed-fist BACK/CANCEL: closes the most recently opened closable
+// thing (a note, a folder pane, a spawned image/model), or failing
+// that, collapses a blooming orb ring — the same "recede" endItem
+// already uses for a bar-tap or tap-close.
+function fistCancel() {
+  const closable = items.filter(c =>
+    (c.type === "panel" || c.type === "browser" ||
+     c.type === "img" || c.type === "model") && c.el.isConnected);
+  if (closable.length) { killItem(closable[closable.length - 1]); return; }
+  const orbs = items.filter(c => c.type === "orb" && c.el.isConnected);
+  if (orbs.length) orbs.forEach(killItem);
+}
+
+// swipe left/right: steps a highlighted row through the topmost open
+// browser pane's currently-visible rows — the "navigate visible
+// cards/items" ask, applied to the one scrollable list this stage
+// actually has. A palm-dwell anywhere in that pane (not just precisely
+// on the row) then opens whatever's highlighted — see palmTargetKey.
+function swipeNav(dir) {
+  const b = items.slice().reverse()
+    .find(c => c.type === "browser" && c.el.isConnected);
+  if (!b || !b.rows.length) return;
+  b.hi = ((b.hi != null && b.hi >= 0 ? b.hi : -1) + dir + b.rows.length) % b.rows.length;
+  browserRefresh(b);
+  const rowEl = b.body.querySelector(`.brow[data-i="${b.hi}"]`);
+  if (rowEl) {
+    const box = b.body.parentElement.clientHeight;
+    const rowTop = rowEl.offsetTop, rowBot = rowTop + rowEl.offsetHeight;
+    if (rowTop < b.scrollY) b.scrollY = rowTop;
+    else if (rowBot > b.scrollY + box) b.scrollY = rowBot - box;
+    b.body.style.transform = `translateY(${-b.scrollY}px)`;
+  }
+  toast(dir > 0 ? "swipe → next" : "swipe ← previous", 500);
+}
+
+// one call per hand per frame, inserted into frame()'s per-hand loop
+// right after the existing palmOpen/softOpen reads settle. `conf` is
+// the SAME "trust this frame" gate the pinch engine uses
+// (!handGarbage), and `slow` is the SAME kind of speed gate (hspd) —
+// nothing here fires while the hand is moving fast or the tracker is
+// guessing, exactly as the spec asked.
+function updatePalmInteraction(cur, i, now, hspd, conf, extFingers) {
+  // ---- gesture label classification (purely cosmetic — drives the
+  // "Detected: …" caption and the cursor's hover/fisted CSS classes) ----
+  const fastMove = hspd > 900;
+  // excludes the claw pose/an active force-pull (cur.fpSplay / cur.fp.ph)
+  // too -- a claw's hooked fingers can read as 0 extended by the same
+  // 1.45x test, and that vocabulary owns holding-still-with-a-closed-ish
+  // hand already; fist-back must never fire underneath it.
+  const inClaw = cur.fpSplay || (cur.fp && cur.fp.ph > 0);
+  const fisted = conf && extFingers === 0 && !cur.pinched && !inClaw;
+  cur.el.classList.toggle("fisted", fisted);
+
+  // ---- SWIPE (edge-triggered off cur.history, open-palm only) ----
+  let swiped = false, swipeDir = 0;
+  if (conf && cur.palmOpen && !fastMove && now > (cur.swipeCooldown || 0)) {
+    const h = cur.history;
+    if (h.length >= 4) {
+      const a = h[Math.max(0, h.length - 5)], b = h[h.length - 1];
+      const dt = b.t - a.t, dx = b.x - a.x, dy = b.y - a.y;
+      if (dt > 0 && dt < 450 && Math.abs(dx) > 140 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+        swipeDir = dx > 0 ? 1 : -1;
+        swipeNav(swipeDir);
+        cur.swipeCooldown = now + 550;   // must settle before it can fire again
+        swiped = true;
+      }
+    }
+  }
+
+  // ---- FIST HOLD → back/cancel ----
+  if (fisted && !fastMove) {
+    if (!cur.fistStart) cur.fistStart = now;
+    const p = Math.min((now - cur.fistStart) / FIST_MS, 1);
+    cur.ring.style.setProperty("--p", p);
+    cur.ringP = p;   // mirrored into pushState() for the OBS overlay
+    if (p >= 1 && !cur.fistFired) {
+      fistCancel();
+      cur.fistFired = true;
+      toast("back / cancel", 500);
+    }
+  } else {
+    cur.fistStart = 0; cur.fistFired = false;
+    if (!cur.palmOpen || !conf) { cur.ring.style.setProperty("--p", 0); cur.ringP = 0; }
+  }
+
+  // ---- PALM DWELL → open (the pinch-tap replacement) ----
+  let target = null, key = null;
+  if (conf && cur.palmOpen && !fisted && !fastMove && !cur.pinched && !swiped) {
+    target = hitTest(cur);
+    key = palmTargetKey(target, cur);
+  }
+  if (key && key === cur.dwellTarget) {
+    const p = Math.min((now - cur.dwellStart) / DWELL_MS, 1);
+    cur.ring.style.setProperty("--p", p);
+    cur.ringP = p;
+    cur.el.style.setProperty("--pr", (1.18 - 0.18 * p).toFixed(3));
+    cur.el.classList.add("hovering");
+    if (p >= 1 && now >= cur.dwellArmedAt) {
+      firePalmTarget(target, cur);
+      // require the hand to leave this exact target before it can
+      // re-arm — the explicit "no accidental repeated opens" ask
+      cur.dwellArmedAt = Infinity;
+    }
+  } else {
+    cur.dwellTarget = key;
+    cur.dwellStart = now;
+    cur.dwellArmedAt = now;
+    cur.el.classList.remove("hovering");
+    cur.el.style.setProperty("--pr", 1);
+    if (!fisted) { cur.ring.style.setProperty("--p", 0); cur.ringP = 0; }
+  }
+
+  // ---- the "Detected: …" label (one hand wins per frame — the last
+  // one processed; good enough for a single-user rig) ----
+  cur.gesture = fisted ? "Fist"
+              : swiped ? (swipeDir > 0 ? "Swipe right" : "Swipe left")
+              : cur.palmOpen ? "Open palm"
+              : "Tracking";
+  curGestureLabel = cur.gesture;
+}
+
+const GESTURE_DOT = { "No hand": "#5c7a78", "Fist": "#ff8c3c",
+  "Swipe left": "#00e5ff", "Swipe right": "#00e5ff",
+  "Open palm": "#00e5ff", "Tracking": "#7fe9ff",
+  "Dragging": "#00e5ff", "Scaling": "#39ffb0" };
+
+// cheap per-frame DOM sync for the caption + gesture-status panel —
+// deliberately does NOT touch statFolders/statFiles (those only
+// change when the tree reloads; see refreshStatPanels()).
+let _lastGestureLabel = null;
+function updateGestureUI() {
+  if (gestureLabelEl && curGestureLabel !== _lastGestureLabel) {
+    _lastGestureLabel = curGestureLabel;
+    const color = GESTURE_DOT[curGestureLabel] || "#00e5ff";
+    gestureLabelEl.innerHTML =
+      `<span class="dot" style="background:${color};box-shadow:0 0 10px ${color}"></span>` +
+      `Detected: ${escT(curGestureLabel)}`;
+  }
+  if (statGestureEl) {
+    const active = Object.keys(cursors).length;
+    const sig = curGestureLabel + "|" + active;
+    if (sig !== statGestureEl.dataset.sig) {
+      statGestureEl.dataset.sig = sig;
+      statGestureEl.querySelector(".body").innerHTML =
+        `<div class="row"><span>state</span><span>${escT(curGestureLabel)}</span></div>` +
+        `<div class="row"><span>hands</span><span>${active}</span></div>`;
+    }
+  }
+}
+
+// ============================================================
+// ONE-FINGER DRAG / TWO-FINGER SCALE (2026-09-21, replaces pinch
+// manipulation entirely -- pinch-to-drag/scale/tap-select are gone,
+// see the retired blocks inside frame() and the gutted endGrab()).
+// Point-drag reuses beginGrab/endGrab/physics() verbatim: those are
+// generic, keyed on c.grabbedBy/c.mode and never on cur.pinched, so
+// pushing this hand's index into grabbedBy from a pointing pose
+// instead of a pinch gets move/scroll/hold-still-rotate/fling-release
+// for free. Two-finger scale is standalone -- it writes straight to
+// the selected model's c.scale, no grabbedBy involved.
+// ============================================================
+const POINT_STABLE_MS = 250;                  // the spec's 200-300ms ask, middle of the range
+const SCALE_MIN = 0.12, SCALE_MAX = 12;        // matches the old two-hand stretch's own bounds
+const SCALE_PX_PER_X = 280;                    // vertical px of travel per 1.0x of scale
+const SCALE_DEADZONE_PX = 10;
+const DRAG_TYPES = new Set(["model", "img", "panel", "browser"]);   // "a currently
+  // selected/open 3D object or panel" -- never the shelf's closed cards,
+  // the menu orbs, or the ring itself
+
+function updateManipulation(cur, i, now, conf, extArr) {
+  const pointing = conf && extArr[0] && !extArr[1] && !extArr[2] && !extArr[3];
+  const twoFinger = conf && extArr[0] && extArr[1] && !extArr[2] && !extArr[3];
+
+  // ---- ONE-FINGER DRAG ----
+  if (cur.pointDragging) {
+    // self-heal first: something else (fist-cancel from a SECOND hand,
+    // a voice "clear") may have killed the item out from under this
+    // drag -- don't stay stuck reporting "Dragging" forever if so.
+    const heldNow = items.find(k => k.id === cur.pointDragId);
+    if (!heldNow || !heldNow.el.isConnected || !heldNow.grabbedBy.includes(i)) {
+      cur.pointDragging = false; cur.pointDragId = null; cur.pointPoseStart = 0;
+    } else if (!pointing) {
+      // "releasing the pointing pose ends the drag"
+      endGrab(heldNow, i, cur);
+      cur.pointDragging = false; cur.pointDragId = null; cur.pointPoseStart = 0;
+    }
+  } else if (pointing) {
+    if (!cur.pointPoseStart) cur.pointPoseStart = now;
+    // brief stable-pose threshold before grab starts, so a hand merely
+    // passing through a pointing shape mid-gesture can't drag by accident
+    if (now - cur.pointPoseStart >= POINT_STABLE_MS) {
+      const target = hitTest(cur);
+      if (target && DRAG_TYPES.has(target.type) && target.grabbedBy.length === 0 &&
+          target.el.isConnected) {
+        beginGrab(target, i, cur);
+        cur.pointDragging = true; cur.pointDragId = target.id;
+      }
+      // no eligible target under a held pose yet: pointPoseStart is left
+      // running, so sliding onto one mid-pose arms instantly, no re-wait
+    }
+  } else {
+    cur.pointPoseStart = 0;
+  }
+
+  // ---- TWO-FINGER SCALE ----
+  if (twoFinger) {
+    let target = cur.scaleTargetId != null &&
+      items.find(k => k.id === cur.scaleTargetId && k.el.isConnected);
+    if (!cur.scaling || !target) {
+      // (re)arm: whatever was last touched if it's still a live 3D
+      // object, else the freshest model on the board -- the same
+      // fallback the voice board's explode/assemble verbs already use
+      target = (lastTouchedId != null &&
+                items.find(k => k.id === lastTouchedId && k.type === "model" &&
+                                k.el.isConnected)) ||
+               items.filter(k => k.type === "model" && k.el.isConnected).pop();
+      if (target) {
+        cur.scaling = true; cur.scaleTargetId = target.id;
+        cur.scaleBaseY = cur.y; cur.scaleBaseScale = target.scale;
+      } else {
+        cur.scaling = false; cur.scaleTargetId = null;
+      }
+    }
+    if (target) {
+      const upPx = cur.scaleBaseY - cur.y;              // up = positive = enlarge
+      const eff = Math.abs(upPx) < SCALE_DEADZONE_PX ? 0 : upPx;   // dead zone
+      const wantScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN,
+        cur.scaleBaseScale + eff / SCALE_PX_PER_X));
+      target.scale += (wantScale - target.scale) * 0.25;  // smoothing (EMA, stops jitter)
+    }
+  } else {
+    cur.scaling = false; cur.scaleTargetId = null;
+  }
+
+  // ---- cursor visuals + the shared gesture label. Runs AFTER
+  // updatePalmInteraction for this same hand every frame, so it wins
+  // curGestureLabel whenever either of these is actually happening
+  // (palmOpen/fisted are already mutually exclusive with pointing/
+  // twoFinger by finger-count alone, so there's no real fight here). ----
+  cur.el.classList.toggle("dragging", cur.pointDragging);
+  cur.el.classList.toggle("scaling", cur.scaling);
+  if (cur.pointDragging) { cur.gesture = "Dragging"; curGestureLabel = "Dragging"; }
+  else if (cur.scaling) { cur.gesture = "Scaling"; curGestureLabel = "Scaling"; }
+}
+
+// NOTE (2026-09-21): only called from updateManipulation()'s point-drag
+// pose now -- every "pinch"/"tap" in the comments below is this
+// function's history (what USED to trigger it), not what does today.
+// The per-type mode setup (move/scroll/stretch) is pose-agnostic and
+// was reused as-is; only the trigger changed.
 function beginGrab(c, i, cur) {
   c.flying = false;
   c.anim = null;                                     // a grab beats an animation
@@ -1773,68 +2207,14 @@ function endGrab(c, i, cur) {
     c.stretch = null;
     const h = cur.history;
     c.hch = 0;                          // hold-charge / movable glow ends
-    // shelf v3: a quick, near-still release on a browser row = the TAP
-    // (folders unfold, notes open, props stage, widgets summon)
-    if (c.type === "browser" && c.mode === "scroll") {
-      const bMs = performance.now() - (cur.grabT || 0);
-      const bTrav = Math.hypot(cur.x - (c.tapX || cur.x),
-                               cur.y - (c.tapY || cur.y));
-      if (bMs < 350 && bTrav < 24) browserTap(c, cur);
-    }
-    // v3.3/v3.8: a quick tap on the GRIP BAR closes — notes and
-    // folder panes alike
-    if ((c.type === "browser" || c.type === "panel") && c.barGrab &&
-        !cur.probKill) {
-      const gMs = performance.now() - (cur.grabT || 0);
-      const gTrav = Math.hypot(cur.x - (c.tapX || cur.x),
-                               cur.y - (c.tapY || cur.y));
-      if (gMs < 350 && gTrav < 24) killItem(c);
-      c.barGrab = false;
-    }
-    // GESTURE v3 (2026-08-14, Jared's spec — "make it a single pinch"):
-    // THE TAP OPENS — a quick, near-still release on a file-card
-    // unfurls its note. Same tap idiom rows and widget buttons already
-    // use; the double flash is dead.
-    const pullFresh = performance.now() - (c.pullT || 0) < 800 ||
-                      cur.probKill;
-    if (c.type === "card" && c.def.file && !pullFresh) {
-      const tMs = performance.now() - (cur.grabT || 0);
-      const tTrav = Math.hypot(cur.x - (c.tapX || cur.x),
-                               cur.y - (c.tapY || cur.y));
-      if (tMs < 300 && tTrav < 26) openPanel(c);
-    }
-    // GESTURE v3.1 (2026-08-14, the crush is DEAD — "that is happening
-    // too naturally"): THE TAP IS SYMMETRIC — tap opens closed things,
-    // tap CLOSES open things. Quick near-still release on a note,
-    // image, or hologram = it recedes. Widgets/rows/orbs keep their own
-    // tap meanings; a fresh force-pull catch can't be tap-killed.
-    // v3.8: notes close at the BAR only (matching folders) — a body
-    // tap can't kill a note mid-read; images/models keep tap-anywhere
-    if ((c.type === "img" || c.type === "model")
-        && !pullFresh && !c.flying) {
-      const xMs = performance.now() - (cur.grabT || 0);
-      const xTrav = Math.hypot(cur.x - (c.tapX || cur.x),
-                               cur.y - (c.tapY || cur.y));
-      if (xMs < 300 && xTrav < 26) killItem(c);
-    }
-    // PHASE 2 quick-tap releases: the RING toggles its orbital bloom;
-    // an ORB grows into its browser pane (same discrimination gate as
-    // the browser-row tap: short grip, near-zero travel)
-    {
-      const qMs = performance.now() - (cur.grabT || 0);
-      const qTr = Math.hypot(cur.x - (c.tapX ?? cur.x),
-                             cur.y - (c.tapY ?? cur.y));
-      if (qMs < 350 && qTr < 24) {
-        if (c.type === "widget" && c.def.w === "ring" &&
-            c.mode === "move") {
-          const sc = RINGS.get(c.id);
-          if (sc) sc.tapT = Date.now() / 1000;   // the ring's tap pulse
-          ringToggle(c);
-        } else if (c.type === "orb") {
-          openBrowser(c.def.orb, c.x, c.y);
-        }
-      }
-    }
+    // TAP-TO-OPEN/CLOSE RETIRED (2026-09-21, Jared's call: "remove pinch-
+    // tap selection... palm-hover dwell remains the only open action"):
+    // every quick-release tap idiom that used to live here (browser-row
+    // open, grip-bar close, card open, img/model close, ring/orb toggle)
+    // is gone. Opening is palm-dwell's job alone now; closing is the
+    // fist-hold back/cancel's job (fistCancel(), called from updatePalmInteraction).
+    // This function is now pure drag-release physics: mode handoff on a
+    // partial release, and the fling-vs-place throw call below.
     let flung = false;
     // v19.1 (Jared's confirm): a fling needs a REAL grip. Motion blur
     // during a fast wave collapses the fingers into a phantom 1-3 frame
@@ -2055,6 +2435,160 @@ function physics(dt) {
   });
 }
 
+// ============================================================
+// HOLO BACKGROUND (2026-09): a lightweight, ISOLATED Three.js scene on
+// its own #holoBG canvas — deliberately separate from the per-item
+// MSCENES bloom rig above (that one is heavy: one scene/camera/
+// renderer per card, adaptive resolution, a hand-rolled bloom shader).
+// This is decoration, not content: one shared scene, primitive
+// geometries only (no GLB assets exist in media/holo or media/models
+// to load anyway), and it self-throttles off the SAME `fps` the main
+// loop already tracks — never adds load the tracker can't spare.
+// Stage/tracker role only (ROLE check happens at call sites in boot()).
+// ============================================================
+let holo = null;
+
+function initHoloBG() {
+  const canvas = document.getElementById("holoBG");
+  if (!canvas) return;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));   // a background never needs full DPR
+  // updateStyle=false: the canvas's CSS box stays governed by
+  // #holoBG's own inset:0 rule (so it tracks the viewport on resize);
+  // only the drawing-buffer resolution is driven from here.
+  renderer.setSize(innerWidth, innerHeight, false);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+  camera.position.set(0, 0.3, 9);
+
+  // the central Jarvis core orb — an additive-glow wire sphere over a
+  // faint solid one, pulsing gently
+  const coreGroup = new THREE.Group();
+  const coreSolid = new THREE.Mesh(
+    new THREE.SphereGeometry(0.55, 24, 24),
+    new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.10 }));
+  const coreWire = new THREE.Mesh(
+    new THREE.SphereGeometry(0.62, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x7fe9ff, wireframe: true, transparent: true, opacity: 0.55 }));
+  coreGroup.add(coreSolid, coreWire);
+  coreGroup.position.set(0, 0.1, 0);
+  scene.add(coreGroup);
+
+  // the wireframe globe — sits behind/around the core, slow independent spin
+  const globe = new THREE.Mesh(
+    new THREE.SphereGeometry(3.4, 20, 14),
+    new THREE.MeshBasicMaterial({ color: 0x0e5a66, wireframe: true, transparent: true, opacity: 0.16 }));
+  scene.add(globe);
+
+  // three rotating primitives orbiting wide, off to the sides so they
+  // never fight the DOM cards for the center of attention
+  const cube = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 0.7, 0.7),
+    new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true, transparent: true, opacity: 0.5 }));
+  const ico = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.55, 0),
+    new THREE.MeshBasicMaterial({ color: 0xff8c3c, wireframe: true, transparent: true, opacity: 0.5 }));
+  // "folder-like data block": a squat box with a thin lid slab, reads as
+  // a stylized file/folder without needing any external model asset
+  const folderGrp = new THREE.Group();
+  const folderBody = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8, 0.55, 0.12),
+    new THREE.MeshBasicMaterial({ color: 0x7fe9ff, wireframe: true, transparent: true, opacity: 0.5 }));
+  const folderTab = new THREE.Mesh(
+    new THREE.BoxGeometry(0.32, 0.14, 0.12),
+    new THREE.MeshBasicMaterial({ color: 0x7fe9ff, wireframe: true, transparent: true, opacity: 0.5 }));
+  folderTab.position.set(-0.22, 0.34, 0);
+  folderGrp.add(folderBody, folderTab);
+  scene.add(cube, ico, folderGrp);
+
+  // idle/hover/selected/cancelled state glow — one ring of particles
+  // whose color + speed react to curGestureLabel; count is fps-adaptive
+  const MAX_PARTICLES = 260, MIN_PARTICLES = 60;
+  const pGeo = new THREE.BufferGeometry();
+  const pPos = new Float32Array(MAX_PARTICLES * 3);
+  const pR = new Float32Array(MAX_PARTICLES), pA = new Float32Array(MAX_PARTICLES);
+  for (let i = 0; i < MAX_PARTICLES; i++) {
+    pR[i] = 2.2 + Math.random() * 2.4;
+    pA[i] = Math.random() * Math.PI * 2;
+    const y = (Math.random() - 0.5) * 3;
+    pPos[i * 3] = Math.cos(pA[i]) * pR[i];
+    pPos[i * 3 + 1] = y;
+    pPos[i * 3 + 2] = Math.sin(pA[i]) * pR[i];
+  }
+  pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
+  pGeo.setDrawRange(0, MAX_PARTICLES);
+  const pMat = new THREE.PointsMaterial({ color: 0x00e5ff, size: 0.05,
+    transparent: true, opacity: 0.7, depthWrite: false });
+  const particles = new THREE.Points(pGeo, pMat);
+  scene.add(particles);
+
+  holo = { renderer, scene, camera, coreGroup, coreWire, globe, cube, ico,
+    folderGrp, particles, pGeo, pPos, pR, pA, activeParticles: MAX_PARTICLES,
+    MAX_PARTICLES, MIN_PARTICLES, t: 0 };
+
+  addEventListener("resize", () => {
+    if (!holo) return;
+    holo.camera.aspect = innerWidth / innerHeight;
+    holo.camera.updateProjectionMatrix();
+    holo.renderer.setSize(innerWidth, innerHeight, false);
+  });
+}
+
+const GESTURE_GLOW = { "No hand": 0x3d5c5a, "Fist": 0xff6a3c,
+  "Swipe left": 0x00e5ff, "Swipe right": 0x00e5ff,
+  "Open palm": 0x39ffb0, "Tracking": 0x00e5ff,
+  "Dragging": 0x00e5ff, "Scaling": 0x39ffb0 };
+
+function updateHoloBG(dt, curFps) {
+  if (!holo) return;
+  holo.t += dt;
+  const t = holo.t;
+
+  holo.coreGroup.rotation.y += dt * 0.3;
+  const pulse = 1 + Math.sin(t * 1.6) * 0.06;
+  holo.coreGroup.scale.setScalar(pulse);
+  holo.coreWire.rotation.x += dt * 0.15;
+
+  holo.globe.rotation.y += dt * 0.05;
+  holo.globe.rotation.x += dt * 0.015;
+
+  holo.cube.position.set(Math.cos(t * 0.35) * 3.6, 0.6 + Math.sin(t * 0.5) * 0.3, Math.sin(t * 0.35) * 3.6 - 1.5);
+  holo.cube.rotation.x += dt * 0.6; holo.cube.rotation.y += dt * 0.8;
+
+  holo.ico.position.set(Math.cos(t * 0.28 + 2.1) * 3.9, -0.5 + Math.cos(t * 0.4) * 0.3, Math.sin(t * 0.28 + 2.1) * 3.9 - 1.5);
+  holo.ico.rotation.x += dt * 0.5; holo.ico.rotation.y -= dt * 0.7;
+
+  holo.folderGrp.position.set(Math.cos(t * 0.22 + 4.2) * 3.3, 0.1 + Math.sin(t * 0.45) * 0.25, Math.sin(t * 0.22 + 4.2) * 3.3 - 1.5);
+  holo.folderGrp.rotation.y += dt * 0.55;
+
+  // FPS-adaptive particle count (spec: "automatically reduce particles
+  // if frame rate drops") — steps down/up in a dead band so it doesn't
+  // flicker the draw range every single frame around the threshold
+  const targetActive = curFps > 0 && curFps < 45
+    ? Math.max(holo.MIN_PARTICLES, holo.activeParticles - 20)
+    : (curFps === 0 || curFps >= 55)
+      ? Math.min(holo.MAX_PARTICLES, holo.activeParticles + 10)
+      : holo.activeParticles;
+  if (targetActive !== holo.activeParticles) {
+    holo.activeParticles = targetActive;
+    holo.pGeo.setDrawRange(0, targetActive);
+  }
+  const glow = GESTURE_GLOW[curGestureLabel] ?? 0x00e5ff;
+  holo.particles.material.color.setHex(glow);
+  const spin = curGestureLabel === "Fist" ? -0.35
+             : (curGestureLabel === "Swipe left" || curGestureLabel === "Swipe right") ? 0.6
+             : 0.12;
+  const pos = holo.pPos;
+  for (let i = 0; i < holo.activeParticles; i++) {
+    holo.pA[i] += dt * spin * (0.4 + (i % 5) * 0.08);
+    pos[i * 3] = Math.cos(holo.pA[i]) * holo.pR[i];
+    pos[i * 3 + 2] = Math.sin(holo.pA[i]) * holo.pR[i];
+  }
+  holo.pGeo.attributes.position.needsUpdate = true;
+
+  holo.renderer.render(holo.scene, holo.camera);
+}
+
 async function boot() {
   await pickInitialCam();
   const vision = await FilesetResolver.forVisionTasks(
@@ -2079,6 +2613,7 @@ async function boot() {
   document.getElementById("boot").remove();
   await loadTree();
   spawnStage();
+  initHoloBG();
   toast("barehands v1.0", 2000);  // build fingerprint
   let lastT = performance.now();
 
@@ -2245,14 +2780,22 @@ async function boot() {
         // 400ms; four straight signature-dead frames = silent drop.
         // Skipped at speed (fast-drag blur would false-trip it) and
         // for force-pull carries (holdingI grips are fist-legal).
-        if (cur.pinched && !wasPinched) { cur.badRun = 0; cur.probKill = false; }
-        else if (cur.pinched && wasPinched &&
+        if (cur.pinched && !wasPinched) {
+          cur.badRun = 0; cur.probKill = false;
+          cur.pinchT = now;   // kept for the probation timer below even
+                              // though nothing grabs on pinch any more --
+                              // claw exemption + the clap disqualifier
+                              // still legitimately read cur.pinched, and
+                              // this keeps that detection accurate.
+        } else if (cur.pinched && wasPinched &&
                  now - (cur.pinchT || 0) < 400 && hspd < 600 && !holdingI) {
           cur.badRun = okBack ? 0 : (cur.badRun || 0) + 1;
           if (cur.badRun >= 4) { cur.pinched = false; cur.probKill = true; }
         } else cur.badRun = 0;
         if (cur.pinched) cur.lastPinchT = now;   // v3.9: clap disqualifier
-        cur.el.classList.toggle("pinched", cur.pinched);
+        // pinch's cursor-color feedback retired alongside pinch-to-drag/
+        // scale/tap (2026-09-21) -- detection above stays real, but the
+        // hand no longer gets a visual cue for a pose that does nothing.
         cur.el.style.left = cur.x + "px"; cur.el.style.top = cur.y + "px";
 
         // ---- THE PALM ENGINE — a gesture set designed for imperfect,
@@ -2265,81 +2808,14 @@ async function boot() {
         cur.palmOpen = palmOpen;
         cur.softOpen = extFingers >= 3 && ratio > 0.7;  // the forgiving open read
 
-        if (cur.pinched && !wasPinched) {
-          cur.pinchT = now;
-          // v19.2 (Jared's confirm): the BIRTH-SPEED gate. Wave blur
-          // enters a phantom pinch and the 0.34-in/0.50-out hysteresis
-          // holds it for the whole sweep — long enough to beat any
-          // duration gate, grab the note, and fire the horizontal-fling
-          // close at wave velocity. The tell is the birth moment: a
-          // real pinch is born on a hand settling onto its target; a
-          // blur pinch is born mid-sweep at full speed. Born over
-          // ~900px/s = a ghost — it cannot grab at all.
-          const bh = cur.history;
-          let born = 0;
-          if (bh.length >= 2) {
-            const a = bh[0], b = bh[bh.length - 1], dt = (b.t - a.t) / 1000;
-            if (dt > 0) born = Math.hypot(b.x - a.x, b.y - a.y) / dt;
-          }
-          cur.ghost = born > 900;
-          if (!cur.ghost) {
-            const c = hitTest(cur);
-            if (c && c.grabbedBy.length < 2 && !c.grabbedBy.includes(i))
-              beginGrab(c, i, cur);
-          }
-        } else if (cur.pinched && cur.ghost) {
-          // v3.9.8 (his rush-grab report: "my hand rushes up, pinches,
-          // and it won't grab — I'm having to wait"): a pinch born at
-          // speed is ghost-flagged (the wave-blur armor) and used to
-          // stay barren until re-pinched. Now it SELF-HEALS: the
-          // moment the hand decelerates onto its target, the grab
-          // fires — no release, no wait.
-          if (hspd < 500 && !items.some(k => k.grabbedBy.includes(i))) {
-            cur.ghost = false;
-            const c = hitTest(cur);
-            if (c && c.grabbedBy.length < 2 && !c.grabbedBy.includes(i))
-              beginGrab(c, i, cur);
-          }
-        } else if (!cur.pinched && wasPinched) {
-          // GESTURE v3 (2026-08-14): the double-flash arming machinery
-          // is GONE — the tap opens AND closes (endGrab, v3.1)
-          const c = items.find(k => k.grabbedBy.includes(i));
-          if (c) endGrab(c, i, cur);
-          cur.scrub = null;
-        }
-
-        // THE EXPLODE SCRUB — hands drive it too, not just the
-        // assistant's explode/assemble verbs: an EMPTY
-        // pinch dragged sideways drives the freshest parted model's
-        // explosion by hand: right = apart, left = together. The slot
-        // was unoccupied (empty pinches did nothing), so the settled
-        // vocabulary is untouched; 30px of deliberate sideways travel
-        // must accrue before it engages, so a missed grab stays a miss.
-        if (cur.pinched && !items.some(k => k.grabbedBy.includes(i))) {
-          if (!cur.scrub) {
-            const m = items.filter(k => k.type === "model" &&
-                                        k.exCap && k.el.isConnected).pop();
-            cur.scrub = m ? { id: m.id, sx: cur.x, base: m.ex || 0,
-                              live: false } : { id: null };
-          } else if (cur.scrub.id != null) {
-            const m = items.find(k => k.id === cur.scrub.id);
-            if (m && m.el.isConnected) {
-              const dx = cur.x - cur.scrub.sx;
-              if (!cur.scrub.live && Math.abs(dx) > 30) {
-                cur.scrub.live = true;
-                cur.scrub.sx = cur.x;      // re-anchor at engage
-                toast(m.ex > 0.5 ? "scrubbing — drag left to rebuild"
-                                 : "scrubbing — drag right to open", 900);
-              }
-              if (cur.scrub.live) {
-                const MIR = -1;            // mirrored tracker: his
-                                           // rightward hand = leftward x
-                m.ex = Math.max(0, Math.min(1,
-                  cur.scrub.base + MIR * (cur.x - cur.scrub.sx) / 340));
-              }
-            }
-          }
-        } else if (!cur.pinched) cur.scrub = null;
+        // PINCH MANIPULATION RETIRED (2026-09-21, Jared's call: "remove
+        // pinch-to-drag, pinch-to-scale... do not leave a hidden pinch
+        // handler that can accidentally trigger actions"). cur.pinched
+        // itself is left computed above -- claw exemption and the clap's
+        // pinch-disqualifier still legitimately read it -- but nothing
+        // below consumes it to grab, drag, scrub, or open/close anything
+        // any more. beginGrab/endGrab are now driven ONLY by the point-
+        // drag pose (see updateManipulation(), called further down).
 
         if (!cur.pinched) {
           // (an old open-palm wipe gesture died here — too easy to
@@ -2349,6 +2825,15 @@ async function boot() {
           if (cur.palmOpen || cur.softOpen) cur.lastOpenT = now;
           if (cur.softOpen) cur.lastSoftT = now;   // the clap's open-approach read
         }
+
+        // NEW (2026-09): palm-hover-dwell open / fist-hold back / swipe
+        // nav — entirely additive, reads the signals above but never
+        // writes any of the pinch/claw fields. UNCHANGED 2026-09-21.
+        updatePalmInteraction(cur, i, now, hspd, !handGarbage, extFingers);
+        // NEW (2026-09-21): one-finger drag / two-finger scale, replacing
+        // pinch manipulation. Runs after the call above so it wins the
+        // shared gesture label whenever it's actually active.
+        updateManipulation(cur, i, now, !handGarbage, extArr);
 
         // ---- THE FORCE PULL v6 — THE CLAW (Jared's gesture design,
         // photo-specced 2026-08-13 night; replaces v5's two-pose scope
@@ -2756,6 +3241,8 @@ async function boot() {
             `\n${cur.fpDbg || ""}` + (SAMPLED ? `\n${SAMPLED}` : "");
       });
       Object.keys(cursors).map(Number).forEach(i => { if (!seen.has(i)) dropCursor(i); });
+      if (res.landmarks.length === 0) curGestureLabel = "No hand";
+      updateGestureUI();
 
       // ---- GESTURE v3.9: THE DELIBERATE CLAP (Jared, after false
       // resets kept wiping his pinch tests: "that reset needs to be
@@ -2877,6 +3364,7 @@ async function boot() {
     physics(dt);
     renderModels();           // the 3D holograms draw their frames
     renderRings();            // the ring draws its frames (both pages)
+    updateHoloBG(dt, fps);    // the background hologram stage
     pushState(now);           // stream the scene to the OBS render page
     requestAnimationFrame(frame);
   }
@@ -2900,7 +3388,7 @@ function pushState(now) {
     cursors: Object.keys(cursors).sort().map(k => {
       const c = cursors[k];
       return { x: +(c.x / innerWidth).toFixed(4), y: +(c.y / innerHeight).toFixed(4),
-               p: c.pinched ? 1 : 0, d: 0 };
+               p: c.pinched ? 1 : 0, d: +(c.ringP || 0).toFixed(3) };
     }),
     items: items.filter(i => i.el.isConnected).map(i => {
       // charge glow now serves the hover verb only (dwell-open retired
